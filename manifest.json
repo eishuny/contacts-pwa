@@ -1,0 +1,14 @@
+{
+  "name": "連絡先＋写真",
+  "short_name": "連絡先",
+  "description": "Google連絡先をiPhone/Windowsで閲覧・編集。顔写真と名刺写真を登録。",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f6f8",
+  "theme_color": "#1a73e8",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

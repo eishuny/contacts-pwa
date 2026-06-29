@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#1a73e8" />
+  <title>連絡先＋写真</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>連絡先＋写真</h1>
+    <div class="topbar-actions">
+      <input id="search" class="search" type="search" placeholder="検索…" hidden />
+      <button id="syncBtn" class="icon-btn" title="再読み込み" hidden>⟳</button>
+      <button id="authBtn" class="primary-btn">ログイン</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section id="welcome" class="welcome">
+      <h2>Googleアカウントでログイン</h2>
+      <p>iPhoneと同期しているGoogle連絡先を、Windows・iPhoneのブラウザから閲覧・編集できます。各連絡先に<strong>顔写真</strong>と<strong>名刺写真</strong>を登録できます。</p>
+      <p class="hint">顔写真はGoogle連絡先の写真として同期され、名刺写真はGoogle Driveの専用フォルダに保存されます。</p>
+    </section>
+
+    <section id="listView" hidden>
+      <div id="contactList" class="contact-list"></div>
+    </section>
+  </main>
+
+  <!-- 編集モーダル -->
+  <div id="editor" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <button id="backBtn" class="icon-btn">←</button>
+        <span id="editorTitle">連絡先</span>
+        <button id="saveBtn" class="primary-btn">保存</button>
+      </div>
+      <div class="modal-body">
+        <div class="photos">
+          <div class="photo-slot">
+            <div class="photo-label">顔写真</div>
+            <div id="facePhoto" class="photo-box" data-kind="face">
+              <span class="photo-placeholder">＋</span>
+              <img hidden />
+            </div>
+            <input id="faceInput" type="file" accept="image/*" hidden />
+            <button class="link-btn" data-clear="face" hidden>削除</button>
+          </div>
+          <div class="photo-slot">
+            <div class="photo-label">名刺写真</div>
+            <div id="cardPhoto" class="photo-box" data-kind="card">
+              <span class="photo-placeholder">＋</span>
+              <img hidden />
+            </div>
+            <input id="cardInput" type="file" accept="image/*" hidden />
+            <button class="link-btn" data-clear="card" hidden>削除</button>
+          </div>
+        </div>
+
+        <label class="field"><span>姓名</span><input id="fName" type="text" placeholder="山田 太郎" /></label>
+        <label class="field"><span>会社</span><input id="fOrg" type="text" /></label>
+        <label class="field"><span>役職</span><input id="fTitle" type="text" /></label>
+
+        <div class="multi-section">
+          <span class="multi-label">電話</span>
+          <div id="phoneRows"></div>
+          <button type="button" class="add-row-btn" data-add="phone">＋ 電話を追加</button>
+        </div>
+
+        <div class="multi-section">
+          <span class="multi-label">メール</span>
+          <div id="emailRows"></div>
+          <button type="button" class="add-row-btn" data-add="email">＋ メールを追加</button>
+        </div>
+
+        <div class="field">
+          <span>誕生日</span>
+          <input id="fBirthday" type="date" />
+          <div id="birthdayInfo" class="birthday-info"></div>
+        </div>
+
+        <label class="field"><span>メモ</span><textarea id="fNote" rows="3"></textarea></label>
+
+        <button id="deleteBtn" class="danger-btn" hidden>この連絡先を削除</button>
+      </div>
+    </div>
+  </div>
+
+  <button id="addBtn" class="fab" hidden>＋</button>
+
+  <div id="toast" class="toast" hidden></div>
+  <div id="spinner" class="spinner-overlay" hidden><div class="spinner"></div></div>
+
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
