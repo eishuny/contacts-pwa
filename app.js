@@ -31,6 +31,7 @@ const els = {
   fNickname: $("fNickname"),
   phoneRows: $("phoneRows"), emailRows: $("emailRows"), addressRows: $("addressRows"),
   fBirthday: $("fBirthday"), birthdayInfo: $("birthdayInfo"),
+  groupFilter: $("groupFilter"),
   groupCheckboxes: $("groupCheckboxes"), newGroupName: $("newGroupName"), addGroupBtn: $("addGroupBtn"),
   fNote: $("fNote"),
   toast: $("toast"), spinner: $("spinner"),
@@ -162,7 +163,7 @@ function reAuth() { accessToken = null; tokenClient && tokenClient.requestAccess
 
 async function onSignedIn() {
   els.authBtn.textContent = "更新";
-  els.search.hidden = false; els.syncBtn.hidden = false; els.addBtn.hidden = false;
+  els.groupFilter.hidden = false; els.search.hidden = false; els.syncBtn.hidden = false; els.addBtn.hidden = false;
   await loadAll();
 }
 
@@ -172,6 +173,7 @@ async function loadAll() {
   try {
     await ensurePhotoFolder();
     await Promise.all([loadContacts(), loadPhotoMeta(), loadGroups()]);
+    populateGroupFilter();
     renderList();
     els.welcome.hidden = true; els.listView.hidden = false;
   } catch (e) { toast(e.message); console.error(e); }
@@ -272,13 +274,26 @@ function personInfo(p) {
   return { name, sub };
 }
 
+function populateGroupFilter() {
+  const prev = els.groupFilter.value;
+  els.groupFilter.innerHTML = '<option value="">全て</option>';
+  for (const g of contactGroups) {
+    const opt = document.createElement("option");
+    opt.value = g.resourceName; opt.textContent = g.name;
+    els.groupFilter.appendChild(opt);
+  }
+  els.groupFilter.value = prev || "";
+}
+
 function renderList() {
   for (const u of objectUrls) URL.revokeObjectURL(u); objectUrls = [];
   const term = (els.search.value || "").trim().toLowerCase();
+  const groupRn = els.groupFilter.value;
   const frag = document.createDocumentFragment();
   let shown = 0;
 
   for (const p of contacts) {
+    if (groupRn && !getPersonGroups(p).includes(groupRn)) continue;
     const { name, sub } = personInfo(p);
     if (term && !(name + " " + sub).toLowerCase().includes(term)) continue;
     shown++;
@@ -591,6 +606,7 @@ els.backBtn.addEventListener("click", closeEditor);
 els.saveBtn.addEventListener("click", save);
 els.deleteBtn.addEventListener("click", removeContact);
 els.search.addEventListener("input", renderList);
+els.groupFilter.addEventListener("change", renderList);
 els.facePhoto.addEventListener("click", () => els.faceInput.click());
 els.cardPhoto.addEventListener("click", () => els.cardInput.click());
 els.faceInput.addEventListener("change", (e) => onPickPhoto("face", e.target.files[0]));

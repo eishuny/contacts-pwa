@@ -28,9 +28,13 @@ body {
 }
 .topbar h1 { font-size: 18px; margin: 0; flex: 0 0 auto; }
 .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.group-filter {
+  border: none; border-radius: 18px; padding: 8px 10px; font-size: 13px;
+  background: #fff; color: var(--blue); max-width: 130px; cursor: pointer;
+}
 .search {
   border: none; border-radius: 18px; padding: 8px 14px; font-size: 14px;
-  width: 40vw; max-width: 260px;
+  width: 30vw; max-width: 200px;
 }
 
 .primary-btn {
