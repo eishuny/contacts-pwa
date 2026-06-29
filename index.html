@@ -62,6 +62,7 @@
         </div>
 
         <label class="field"><span>姓名</span><input id="fName" type="text" placeholder="山田 太郎" /></label>
+        <label class="field"><span>ニックネーム（日本語名等）</span><input id="fNickname" type="text" placeholder="山田 太郎" /></label>
         <label class="field"><span>会社</span><input id="fOrg" type="text" /></label>
         <label class="field"><span>役職</span><input id="fTitle" type="text" /></label>
 
@@ -77,10 +78,25 @@
           <button type="button" class="add-row-btn" data-add="email">＋ メールを追加</button>
         </div>
 
+        <div class="multi-section">
+          <span class="multi-label">住所</span>
+          <div id="addressRows"></div>
+          <button type="button" class="add-row-btn" data-add="address">＋ 住所を追加</button>
+        </div>
+
         <div class="field">
           <span>誕生日</span>
           <input id="fBirthday" type="date" />
           <div id="birthdayInfo" class="birthday-info"></div>
+        </div>
+
+        <div class="multi-section">
+          <span class="multi-label">グループ</span>
+          <div id="groupCheckboxes" class="group-checks"></div>
+          <div class="group-add-row">
+            <input id="newGroupName" type="text" placeholder="新しいグループ名" />
+            <button type="button" id="addGroupBtn" class="add-row-btn">＋ 作成</button>
+          </div>
         </div>
 
         <label class="field"><span>メモ</span><textarea id="fNote" rows="3"></textarea></label>

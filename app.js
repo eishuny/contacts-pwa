@@ -6,7 +6,7 @@ const SCOPES = [
   "https://www.googleapis.com/auth/drive.file",
 ].join(" ");
 const PHOTO_FOLDER_NAME = "ContactsPWA_Photos";
-const PERSON_FIELDS = "names,emailAddresses,phoneNumbers,organizations,biographies,photos,metadata,birthdays";
+const PERSON_FIELDS = "names,nicknames,emailAddresses,phoneNumbers,addresses,organizations,biographies,photos,metadata,birthdays,memberships";
 
 /* ============ 状態 ============ */
 let tokenClient = null;
@@ -14,6 +14,7 @@ let accessToken = null;
 let contacts = [];           // People API の person オブジェクト配列
 let photoFolderId = null;    // Drive 上の写真フォルダID
 let photoMeta = {};          // contactId -> { faceFileId, cardFileId }
+let contactGroups = [];      // { resourceName, name } の配列
 let objectUrls = [];         // 解放用
 let current = null;          // 編集中の連絡先 { person, isNew, pendingFace, pendingCard, clearFace, clearCard }
 
@@ -27,8 +28,10 @@ const els = {
   facePhoto: $("facePhoto"), cardPhoto: $("cardPhoto"),
   faceInput: $("faceInput"), cardInput: $("cardInput"),
   fName: $("fName"), fOrg: $("fOrg"), fTitle: $("fTitle"),
-  phoneRows: $("phoneRows"), emailRows: $("emailRows"),
+  fNickname: $("fNickname"),
+  phoneRows: $("phoneRows"), emailRows: $("emailRows"), addressRows: $("addressRows"),
   fBirthday: $("fBirthday"), birthdayInfo: $("birthdayInfo"),
+  groupCheckboxes: $("groupCheckboxes"), newGroupName: $("newGroupName"), addGroupBtn: $("addGroupBtn"),
   fNote: $("fNote"),
   toast: $("toast"), spinner: $("spinner"),
 };
@@ -83,12 +86,17 @@ const EMAIL_TYPES = [
   ["work", "会社"],
   ["other", "その他"],
 ];
+const ADDRESS_TYPES = [
+  ["home", "自宅"],
+  ["work", "会社"],
+  ["other", "その他"],
+];
 
 function addRow(container, kind, value, type) {
-  const types = kind === "phone" ? PHONE_TYPES : EMAIL_TYPES;
-  const inputType = kind === "phone" ? "tel" : "email";
+  const typesMap = { phone: PHONE_TYPES, email: EMAIL_TYPES, address: ADDRESS_TYPES };
+  const types = typesMap[kind];
   const row = document.createElement("div");
-  row.className = "multi-row";
+  row.className = "multi-row" + (kind === "address" ? " multi-row-address" : "");
   const sel = document.createElement("select");
   for (const [val, label] of types) {
     const opt = document.createElement("option");
@@ -96,8 +104,15 @@ function addRow(container, kind, value, type) {
     if (val === type) opt.selected = true;
     sel.appendChild(opt);
   }
-  const inp = document.createElement("input");
-  inp.type = inputType; inp.value = value || "";
+  let inp;
+  if (kind === "address") {
+    inp = document.createElement("textarea");
+    inp.rows = 2; inp.value = value || "";
+  } else {
+    inp = document.createElement("input");
+    inp.type = kind === "phone" ? "tel" : "email";
+    inp.value = value || "";
+  }
   const btn = document.createElement("button");
   btn.type = "button"; btn.className = "remove-row"; btn.textContent = "✕";
   btn.addEventListener("click", () => row.remove());
@@ -107,7 +122,7 @@ function addRow(container, kind, value, type) {
 
 function getRows(container) {
   return Array.from(container.querySelectorAll(".multi-row")).map((row) => ({
-    value: row.querySelector("input").value.trim(),
+    value: (row.querySelector("input") || row.querySelector("textarea")).value.trim(),
     type: row.querySelector("select").value,
   })).filter((r) => r.value);
 }
@@ -156,7 +171,7 @@ async function loadAll() {
   busy(true);
   try {
     await ensurePhotoFolder();
-    await Promise.all([loadContacts(), loadPhotoMeta()]);
+    await Promise.all([loadContacts(), loadPhotoMeta(), loadGroups()]);
     renderList();
     els.welcome.hidden = true; els.listView.hidden = false;
   } catch (e) { toast(e.message); console.error(e); }
@@ -212,6 +227,25 @@ async function loadPhotoMeta() {
   } while (pageToken);
 }
 
+async function loadGroups() {
+  contactGroups = [];
+  const data = await api("https://people.googleapis.com/v1/contactGroups?pageSize=100&groupFields=name,groupType");
+  for (const g of data.contactGroups || []) {
+    if (g.groupType === "USER_CONTACT_GROUP") {
+      contactGroups.push({ resourceName: g.resourceName, name: g.name });
+    }
+  }
+  contactGroups.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function getPersonGroups(person) {
+  if (!person?.memberships) return [];
+  return person.memberships
+    .filter((m) => m.contactGroupMembership)
+    .map((m) => m.contactGroupMembership.contactGroupResourceName)
+    .filter((rn) => rn !== "contactGroups/myContacts");
+}
+
 async function driveImageUrl(fileId) {
   const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
     headers: { Authorization: "Bearer " + accessToken },
@@ -224,15 +258,16 @@ async function driveImageUrl(fileId) {
 /* ============ 一覧表示 ============ */
 function personInfo(p) {
   const displayName = p.names?.[0]?.displayName;
+  const nickname = p.nicknames?.[0]?.value;
   const org = p.organizations?.[0];
   const orgLine = [org?.name, org?.title].filter(Boolean).join(" · ");
-  // 個人名があればそれをメインに、無ければ会社名 → メール → 電話 の順でメイン表示
   const name = displayName || org?.name || p.emailAddresses?.[0]?.value
     || p.phoneNumbers?.[0]?.value || "（名称未設定）";
-  // メインに使ったものと重複しないサブ情報を選ぶ
   let sub = "";
-  if (displayName) sub = orgLine || p.emailAddresses?.[0]?.value || p.phoneNumbers?.[0]?.value || "";
-  else if (org?.name) sub = org?.title || p.emailAddresses?.[0]?.value || p.phoneNumbers?.[0]?.value || "";
+  if (displayName) {
+    const parts = [nickname, orgLine].filter(Boolean);
+    sub = parts.join(" / ") || p.emailAddresses?.[0]?.value || p.phoneNumbers?.[0]?.value || "";
+  } else if (org?.name) sub = org?.title || p.emailAddresses?.[0]?.value || p.phoneNumbers?.[0]?.value || "";
   else sub = p.phoneNumbers?.[0]?.value || "";
   return { name, sub };
 }
@@ -297,6 +332,7 @@ async function openEditor(person) {
   els.deleteBtn.hidden = !person;
 
   els.fName.value = p.names?.[0]?.displayName || "";
+  els.fNickname.value = p.nicknames?.[0]?.value || "";
   els.fOrg.value = p.organizations?.[0]?.name || "";
   els.fTitle.value = p.organizations?.[0]?.title || "";
   els.fNote.value = p.biographies?.[0]?.value || "";
@@ -319,6 +355,13 @@ async function openEditor(person) {
     addRow(els.emailRows, "email", "", "home");
   }
 
+  // 住所を複数行で表示
+  els.addressRows.innerHTML = "";
+  const addrs = p.addresses || [];
+  if (addrs.length) {
+    for (const a of addrs) addRow(els.addressRows, "address", a.formattedValue || a.streetAddress || "", a.type || "home");
+  }
+
   // 誕生日
   const bd = p.birthdays?.[0]?.date;
   if (bd && bd.month && bd.day) {
@@ -332,6 +375,22 @@ async function openEditor(person) {
     els.fBirthday.value = "";
     els.birthdayInfo.textContent = "";
   }
+
+  // グループ
+  const memberOf = getPersonGroups(p);
+  els.groupCheckboxes.innerHTML = "";
+  for (const g of contactGroups) {
+    const chip = document.createElement("div");
+    chip.className = "group-chip";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.value = g.resourceName;
+    cb.id = "grp_" + g.resourceName; cb.checked = memberOf.includes(g.resourceName);
+    const lbl = document.createElement("label");
+    lbl.htmlFor = cb.id; lbl.textContent = g.name;
+    chip.appendChild(cb); chip.appendChild(lbl);
+    els.groupCheckboxes.appendChild(chip);
+  }
+  els.newGroupName.value = "";
 
   resetPhotoBox("face"); resetPhotoBox("card");
   els.editor.hidden = false;
@@ -383,8 +442,10 @@ function clearPhoto(kind) {
 /* ============ 保存 ============ */
 function buildPersonBody() {
   const name = els.fName.value.trim();
+  const nickname = els.fNickname.value.trim();
   const phoneEntries = getRows(els.phoneRows).map((r) => ({ value: r.value, type: r.type }));
   const emailEntries = getRows(els.emailRows).map((r) => ({ value: r.value, type: r.type }));
+  const addressEntries = getRows(els.addressRows).map((r) => ({ formattedValue: r.value, type: r.type }));
   const bdVal = els.fBirthday.value;
   let birthdays = [];
   if (bdVal) {
@@ -393,10 +454,12 @@ function buildPersonBody() {
   }
   const body = {
     names: name ? [{ unstructuredName: name }] : [],
+    nicknames: nickname ? [{ value: nickname }] : [],
     organizations: (els.fOrg.value || els.fTitle.value)
       ? [{ name: els.fOrg.value.trim(), title: els.fTitle.value.trim() }] : [],
     phoneNumbers: phoneEntries,
     emailAddresses: emailEntries,
+    addresses: addressEntries,
     birthdays,
     biographies: els.fNote.value.trim() ? [{ value: els.fNote.value.trim(), contentType: "TEXT_PLAIN" }] : [],
   };
@@ -441,7 +504,7 @@ async function save() {
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
       );
     } else {
-      const mask = "names,organizations,phoneNumbers,emailAddresses,birthdays,biographies";
+      const mask = "names,nicknames,organizations,phoneNumbers,emailAddresses,addresses,birthdays,biographies";
       person = await api(
         `https://people.googleapis.com/v1/${person.resourceName}:updateContact` +
         `?updatePersonFields=${mask}&personFields=${PERSON_FIELDS}`,
@@ -475,6 +538,24 @@ async function save() {
     } else if (current.clearCard && meta.cardFileId) {
       await deleteDrivePhoto(meta.cardFileId).catch(() => {});
       delete meta.cardFileId;
+    }
+
+    // グループの追加・削除
+    const selectedGroups = Array.from(els.groupCheckboxes.querySelectorAll("input:checked")).map((cb) => cb.value);
+    const prevGroups = getPersonGroups(person);
+    const toAdd = selectedGroups.filter((g) => !prevGroups.includes(g));
+    const toRemove = prevGroups.filter((g) => !selectedGroups.includes(g));
+    for (const grn of toAdd) {
+      await api(`https://people.googleapis.com/v1/${grn}/members:modify`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resourceNamesToAdd: [person.resourceName] }),
+      }).catch(() => {});
+    }
+    for (const grn of toRemove) {
+      await api(`https://people.googleapis.com/v1/${grn}/members:modify`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resourceNamesToRemove: [person.resourceName] }),
+      }).catch(() => {});
     }
 
     toast("保存しました");
@@ -525,9 +606,35 @@ els.fBirthday.addEventListener("change", () => {
 document.querySelectorAll("[data-add]").forEach((b) =>
   b.addEventListener("click", () => {
     const kind = b.dataset.add;
-    const container = kind === "phone" ? els.phoneRows : els.emailRows;
-    addRow(container, kind, "", kind === "phone" ? "mobile" : "home");
+    const containers = { phone: els.phoneRows, email: els.emailRows, address: els.addressRows };
+    const defaults = { phone: "mobile", email: "home", address: "home" };
+    addRow(containers[kind], kind, "", defaults[kind]);
   }));
+els.addGroupBtn.addEventListener("click", async () => {
+  const name = els.newGroupName.value.trim();
+  if (!name) return;
+  busy(true);
+  try {
+    const created = await api("https://people.googleapis.com/v1/contactGroups", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contactGroup: { name } }),
+    });
+    contactGroups.push({ resourceName: created.resourceName, name: created.name });
+    contactGroups.sort((a, b) => a.name.localeCompare(b.name));
+    const chip = document.createElement("div");
+    chip.className = "group-chip";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.value = created.resourceName;
+    cb.id = "grp_" + created.resourceName; cb.checked = true;
+    const lbl = document.createElement("label");
+    lbl.htmlFor = cb.id; lbl.textContent = created.name;
+    chip.appendChild(cb); chip.appendChild(lbl);
+    els.groupCheckboxes.appendChild(chip);
+    els.newGroupName.value = "";
+    toast("グループ「" + name + "」を作成しました");
+  } catch (e) { toast(e.message); }
+  finally { busy(false); }
+});
 
 /* ============ 起動 ============ */
 initAuth();
