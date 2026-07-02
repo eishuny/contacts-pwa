@@ -38,6 +38,7 @@ const els = {
   fNote: $("fNote"), archiveBtn: $("archiveBtn"),
   archiveListBtn: $("archiveListBtn"), archiveModal: $("archiveModal"),
   archiveBackBtn: $("archiveBackBtn"), archiveList: $("archiveList"),
+  exportBtn: $("exportBtn"),
   toast: $("toast"), spinner: $("spinner"),
 };
 
@@ -168,7 +169,7 @@ function reAuth() { accessToken = null; tokenClient && tokenClient.requestAccess
 async function onSignedIn() {
   els.authBtn.textContent = "更新";
   els.groupFilter.hidden = false; els.search.hidden = false; els.syncBtn.hidden = false; els.addBtn.hidden = false;
-  els.archiveListBtn.hidden = false;
+  els.archiveListBtn.hidden = false; els.exportBtn.hidden = false;
   await loadAll();
 }
 
@@ -786,6 +787,55 @@ async function restoreContact(g, data) {
   finally { busy(false); }
 }
 
+/* ============ エクスポート（バックアップ） ============ */
+async function fetchDriveBase64(fileId) {
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: { Authorization: "Bearer " + accessToken },
+  });
+  if (!res.ok) return null;
+  return blobToBase64(await res.blob());
+}
+
+function personToExport(p) {
+  return {
+    name: p.names?.[0]?.displayName || "",
+    nickname: p.nicknames?.[0]?.value || "",
+    organization: p.organizations?.[0]?.name || "",
+    title: p.organizations?.[0]?.title || "",
+    phones: (p.phoneNumbers || []).map((ph) => ({ value: ph.value, type: ph.type })),
+    emails: (p.emailAddresses || []).map((e) => ({ value: e.value, type: e.type })),
+    addresses: (p.addresses || []).map((a) => ({ value: a.formattedValue || a.streetAddress || "", type: a.type })),
+    birthday: p.birthdays?.[0]?.date || null,
+    note: p.biographies?.[0]?.value || "",
+    groups: getPersonGroups(p).map((rn) => contactGroups.find((g) => g.resourceName === rn)?.name).filter(Boolean),
+  };
+}
+
+async function exportBackup() {
+  busy(true);
+  try {
+    const items = [];
+    for (const p of contacts) {
+      const cid = safeId(p.resourceName);
+      const meta = photoMeta[cid] || {};
+      const item = personToExport(p);
+      if (meta.faceFileId) item.facePhotoBase64 = await fetchDriveBase64(meta.faceFileId);
+      if (meta.cardFileId) item.cardPhotoBase64 = await fetchDriveBase64(meta.cardFileId);
+      items.push(item);
+    }
+    const backup = { exportedAt: new Date().toISOString(), count: items.length, contacts: items };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const a = document.createElement("a");
+    a.href = url; a.download = `contacts-backup-${dateStr}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    toast(`${items.length}件をエクスポートしました`);
+  } catch (e) { toast(e.message); console.error(e); }
+  finally { busy(false); }
+}
+
 function closeEditor() { els.editor.hidden = true; current = null; }
 
 /* ============ イベント ============ */
@@ -798,6 +848,7 @@ els.deleteBtn.addEventListener("click", removeContact);
 els.archiveBtn.addEventListener("click", archiveContact);
 els.archiveListBtn.addEventListener("click", () => { els.archiveModal.hidden = false; loadArchiveList(); });
 els.archiveBackBtn.addEventListener("click", () => { els.archiveModal.hidden = true; });
+els.exportBtn.addEventListener("click", exportBackup);
 els.search.addEventListener("input", renderList);
 els.groupFilter.addEventListener("change", renderList);
 els.facePhoto.addEventListener("click", () => els.faceInput.click());
