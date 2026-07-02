@@ -6,6 +6,7 @@ const SCOPES = [
   "https://www.googleapis.com/auth/drive.file",
 ].join(" ");
 const PHOTO_FOLDER_NAME = "ContactsPWA_Photos";
+const ARCHIVE_FOLDER_NAME = "ContactsPWA_Archive";
 const PERSON_FIELDS = "names,nicknames,emailAddresses,phoneNumbers,addresses,organizations,biographies,photos,metadata,birthdays,memberships";
 
 /* ============ 状態 ============ */
@@ -13,6 +14,7 @@ let tokenClient = null;
 let accessToken = null;
 let contacts = [];           // People API の person オブジェクト配列
 let photoFolderId = null;    // Drive 上の写真フォルダID
+let archiveFolderId = null;  // Drive 上のアーカイブフォルダID
 let photoMeta = {};          // contactId -> { faceFileId, cardFileId }
 let contactGroups = [];      // { resourceName, name } の配列
 let objectUrls = [];         // 解放用
@@ -33,7 +35,9 @@ const els = {
   fBirthday: $("fBirthday"), birthdayInfo: $("birthdayInfo"),
   groupFilter: $("groupFilter"),
   groupCheckboxes: $("groupCheckboxes"), newGroupName: $("newGroupName"), addGroupBtn: $("addGroupBtn"),
-  fNote: $("fNote"),
+  fNote: $("fNote"), archiveBtn: $("archiveBtn"),
+  archiveListBtn: $("archiveListBtn"), archiveModal: $("archiveModal"),
+  archiveBackBtn: $("archiveBackBtn"), archiveList: $("archiveList"),
   toast: $("toast"), spinner: $("spinner"),
 };
 
@@ -164,6 +168,7 @@ function reAuth() { accessToken = null; tokenClient && tokenClient.requestAccess
 async function onSignedIn() {
   els.authBtn.textContent = "更新";
   els.groupFilter.hidden = false; els.search.hidden = false; els.syncBtn.hidden = false; els.addBtn.hidden = false;
+  els.archiveListBtn.hidden = false;
   await loadAll();
 }
 
@@ -171,7 +176,7 @@ async function onSignedIn() {
 async function loadAll() {
   busy(true);
   try {
-    await ensurePhotoFolder();
+    await Promise.all([ensurePhotoFolder(), ensureArchiveFolder()]);
     await Promise.all([loadContacts(), loadPhotoMeta(), loadGroups()]);
     populateGroupFilter();
     renderList();
@@ -207,6 +212,20 @@ async function ensurePhotoFolder() {
     body: JSON.stringify({ name: PHOTO_FOLDER_NAME, mimeType: "application/vnd.google-apps.folder" }),
   });
   photoFolderId = created.id;
+}
+
+async function ensureArchiveFolder() {
+  const q = encodeURIComponent(
+    `name='${ARCHIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`
+  );
+  const data = await api(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`);
+  if (data.files && data.files.length) { archiveFolderId = data.files[0].id; return; }
+  const created = await api("https://www.googleapis.com/drive/v3/files", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: ARCHIVE_FOLDER_NAME, mimeType: "application/vnd.google-apps.folder" }),
+  });
+  archiveFolderId = created.id;
 }
 
 async function loadPhotoMeta() {
@@ -345,6 +364,7 @@ async function openEditor(person) {
   const p = person || {};
   els.editorTitle.textContent = person ? "連絡先を編集" : "新規連絡先";
   els.deleteBtn.hidden = !person;
+  els.archiveBtn.hidden = !person;
 
   els.fName.value = p.names?.[0]?.displayName || "";
   els.fNickname.value = p.nicknames?.[0]?.value || "";
@@ -507,7 +527,9 @@ async function deleteDrivePhoto(fileId) {
 }
 
 async function save() {
-  if (!els.fName.value.trim()) { toast("名前を入力してください"); return; }
+  const hasAnyInfo = els.fName.value.trim() || els.fOrg.value.trim()
+    || getRows(els.phoneRows).length || getRows(els.emailRows).length;
+  if (!hasAnyInfo) { toast("氏名・会社名・電話・メールのいずれかを入力してください"); return; }
   busy(true);
   try {
     let person = current.person;
@@ -596,6 +618,172 @@ async function removeContact() {
   finally { busy(false); }
 }
 
+/* ============ アーカイブ ============ */
+function personToArchiveBody(p) {
+  return {
+    names: p.names?.length ? [{ unstructuredName: p.names[0].displayName }] : [],
+    nicknames: p.nicknames?.length ? [{ value: p.nicknames[0].value }] : [],
+    organizations: p.organizations?.length
+      ? [{ name: p.organizations[0].name || "", title: p.organizations[0].title || "" }] : [],
+    phoneNumbers: (p.phoneNumbers || []).map((ph) => ({ value: ph.value, type: ph.type })),
+    emailAddresses: (p.emailAddresses || []).map((e) => ({ value: e.value, type: e.type })),
+    addresses: (p.addresses || []).map((a) => ({ formattedValue: a.formattedValue || a.streetAddress || "", type: a.type })),
+    birthdays: p.birthdays?.length && p.birthdays[0].date ? [{ date: p.birthdays[0].date }] : [],
+    biographies: p.biographies?.length ? [{ value: p.biographies[0].value, contentType: "TEXT_PLAIN" }] : [],
+  };
+}
+
+async function moveFile(fileId, fromParent, toParent) {
+  await api(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${toParent}&removeParents=${fromParent}`,
+    { method: "PATCH" });
+}
+
+async function renameFile(fileId, newName) {
+  await api(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: newName }),
+  });
+}
+
+function blobToBase64(blob) {
+  return new Promise((res) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(",")[1]);
+    r.readAsDataURL(blob);
+  });
+}
+
+async function archiveContact() {
+  if (!current.person || !confirm("この連絡先をDriveにアーカイブしますか？（Google連絡先からは削除されます）")) return;
+  busy(true);
+  try {
+    const person = current.person;
+    const cid = safeId(person.resourceName);
+    const { name } = personInfo(person);
+    const groupNames = getPersonGroups(person)
+      .map((rn) => contactGroups.find((g) => g.resourceName === rn)?.name)
+      .filter(Boolean);
+    const archiveBody = {
+      displayName: name,
+      archivedAt: new Date().toISOString(),
+      personBody: personToArchiveBody(person),
+      groupNames,
+    };
+    const jsonBlob = new Blob([JSON.stringify(archiveBody, null, 2)], { type: "application/json" });
+    const meta = { name: `${cid}__data.json`, parents: [archiveFolderId] };
+    const form = new FormData();
+    form.append("metadata", new Blob([JSON.stringify(meta)], { type: "application/json" }));
+    form.append("file", jsonBlob);
+    await api("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", { method: "POST", body: form });
+
+    const pMeta = photoMeta[cid] || {};
+    if (pMeta.faceFileId) await moveFile(pMeta.faceFileId, photoFolderId, archiveFolderId);
+    if (pMeta.cardFileId) await moveFile(pMeta.cardFileId, photoFolderId, archiveFolderId);
+
+    await api(`https://people.googleapis.com/v1/${person.resourceName}:deleteContact`, { method: "DELETE" });
+
+    toast("アーカイブしました");
+    closeEditor();
+    await loadAll();
+  } catch (e) { toast(e.message); console.error(e); }
+  finally { busy(false); }
+}
+
+async function loadArchiveList() {
+  busy(true);
+  try {
+    const q = encodeURIComponent(`'${archiveFolderId}' in parents and trashed=false`);
+    let pageToken = "";
+    const files = [];
+    do {
+      const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=nextPageToken,files(id,name)&pageSize=1000` +
+        (pageToken ? `&pageToken=${pageToken}` : "");
+      const data = await api(url);
+      files.push(...(data.files || []));
+      pageToken = data.nextPageToken || "";
+    } while (pageToken);
+
+    const groups = {};
+    for (const f of files) {
+      const m = f.name.match(/^(.+)__(data|face|card)\.(json|jpg)$/);
+      if (!m) continue;
+      const cid = m[1];
+      (groups[cid] ||= {})[m[2] === "data" ? "dataFileId" : m[2] === "face" ? "faceFileId" : "cardFileId"] = f.id;
+    }
+
+    els.archiveList.innerHTML = "";
+    const cids = Object.keys(groups).filter((cid) => groups[cid].dataFileId);
+    if (!cids.length) {
+      els.archiveList.innerHTML = `<p style="text-align:center;color:var(--muted);margin-top:40px">アーカイブされた連絡先はありません</p>`;
+      return;
+    }
+    for (const cid of cids) {
+      const g = groups[cid];
+      const data = await api(`https://www.googleapis.com/drive/v3/files/${g.dataFileId}?alt=media`);
+      const row = document.createElement("div");
+      row.className = "contact-row";
+      row.innerHTML = `
+        <div class="avatar">${(data.displayName || "?").charAt(0)}</div>
+        <div class="contact-meta">
+          <div class="name"></div>
+          <div class="sub"></div>
+        </div>
+        <button class="link-btn" style="color:var(--blue)">復元</button>`;
+      row.querySelector(".name").textContent = data.displayName || "（名称未設定）";
+      row.querySelector(".sub").textContent = "アーカイブ日: " +
+        (data.archivedAt ? new Date(data.archivedAt).toLocaleDateString("ja-JP") : "");
+      row.querySelector("button").addEventListener("click", () => restoreContact(g, data));
+      els.archiveList.appendChild(row);
+    }
+  } catch (e) { toast(e.message); console.error(e); }
+  finally { busy(false); }
+}
+
+async function restoreContact(g, data) {
+  if (!confirm(`「${data.displayName}」をGoogle連絡先に復元しますか？`)) return;
+  busy(true);
+  try {
+    const created = await api(
+      `https://people.googleapis.com/v1/people:createContact?personFields=${PERSON_FIELDS}`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data.personBody) }
+    );
+    const newCid = safeId(created.resourceName);
+
+    if (g.faceFileId) {
+      await moveFile(g.faceFileId, archiveFolderId, photoFolderId);
+      await renameFile(g.faceFileId, `${newCid}__face.jpg`);
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${g.faceFileId}?alt=media`,
+        { headers: { Authorization: "Bearer " + accessToken } });
+      const b64 = await blobToBase64(await res.blob());
+      await api(`https://people.googleapis.com/v1/${created.resourceName}:updateContactPhoto`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photoBytes: b64, personFields: PERSON_FIELDS }),
+      });
+    }
+    if (g.cardFileId) {
+      await moveFile(g.cardFileId, archiveFolderId, photoFolderId);
+      await renameFile(g.cardFileId, `${newCid}__card.jpg`);
+    }
+
+    for (const gname of data.groupNames || []) {
+      const grp = contactGroups.find((cg) => cg.name === gname);
+      if (grp) {
+        await api(`https://people.googleapis.com/v1/${grp.resourceName}/members:modify`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ resourceNamesToAdd: [created.resourceName] }),
+        }).catch(() => {});
+      }
+    }
+
+    if (g.dataFileId) await deleteDrivePhoto(g.dataFileId).catch(() => {});
+
+    toast("復元しました");
+    await loadArchiveList();
+    await loadAll();
+  } catch (e) { toast(e.message); console.error(e); }
+  finally { busy(false); }
+}
+
 function closeEditor() { els.editor.hidden = true; current = null; }
 
 /* ============ イベント ============ */
@@ -605,6 +793,9 @@ els.addBtn.addEventListener("click", () => openEditor(null));
 els.backBtn.addEventListener("click", closeEditor);
 els.saveBtn.addEventListener("click", save);
 els.deleteBtn.addEventListener("click", removeContact);
+els.archiveBtn.addEventListener("click", archiveContact);
+els.archiveListBtn.addEventListener("click", () => { els.archiveModal.hidden = false; loadArchiveList(); });
+els.archiveBackBtn.addEventListener("click", () => { els.archiveModal.hidden = true; });
 els.search.addEventListener("input", renderList);
 els.groupFilter.addEventListener("change", renderList);
 els.facePhoto.addEventListener("click", () => els.faceInput.click());

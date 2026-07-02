@@ -17,6 +17,7 @@
         <option value="">全て</option>
       </select>
       <input id="search" class="search" type="search" placeholder="検索…" hidden />
+      <button id="archiveListBtn" class="icon-btn archive-icon-btn" title="アーカイブ一覧" hidden>🗄️</button>
       <button id="syncBtn" class="icon-btn" title="再読み込み" hidden>⟳</button>
       <button id="authBtn" class="primary-btn">ログイン</button>
     </div>
@@ -104,7 +105,22 @@
 
         <label class="field"><span>メモ</span><textarea id="fNote" rows="3"></textarea></label>
 
+        <button id="archiveBtn" class="archive-btn" hidden>アーカイブ（Driveに保存して削除）</button>
         <button id="deleteBtn" class="danger-btn" hidden>この連絡先を削除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- アーカイブ一覧モーダル -->
+  <div id="archiveModal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <button id="archiveBackBtn" class="icon-btn">←</button>
+        <span>アーカイブ一覧</span>
+        <span style="width:38px"></span>
+      </div>
+      <div class="modal-body">
+        <div id="archiveList" class="contact-list"></div>
       </div>
     </div>
   </div>

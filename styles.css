@@ -47,6 +47,10 @@ body {
   width: 38px; height: 38px; border-radius: 50%; cursor: pointer;
 }
 .icon-btn:active { background: rgba(255,255,255,.2); }
+.icon-btn.archive-icon-btn {
+  background: rgba(255,255,255,.18); font-size: 17px;
+}
+.icon-btn.archive-icon-btn:active { background: rgba(255,255,255,.32); }
 
 .welcome { max-width: 560px; margin: 40px auto; padding: 24px; text-align: center; }
 .welcome h2 { color: var(--blue); }
@@ -143,6 +147,7 @@ body {
 .group-add-row input:focus { outline: none; border-color: var(--blue); }
 
 .danger-btn { width: 100%; margin-top: 10px; background: none; border: 1px solid var(--danger); color: var(--danger); border-radius: 8px; padding: 12px; font-size: 15px; cursor: pointer; }
+.archive-btn { width: 100%; margin-top: 10px; background: none; border: 1px solid var(--blue); color: var(--blue); border-radius: 8px; padding: 12px; font-size: 15px; cursor: pointer; }
 
 .toast {
   position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
