@@ -282,12 +282,14 @@ function personInfo(p) {
   const nickname = p.nicknames?.[0]?.value;
   const org = p.organizations?.[0];
   const orgLine = [org?.name, org?.title].filter(Boolean).join(" · ");
-  const name = displayName || org?.name || p.emailAddresses?.[0]?.value
+  const name = nickname || displayName || org?.name || p.emailAddresses?.[0]?.value
     || p.phoneNumbers?.[0]?.value || "（名称未設定）";
   let sub = "";
-  if (displayName) {
-    const parts = [nickname, orgLine].filter(Boolean);
+  if (nickname) {
+    const parts = [displayName, orgLine].filter(Boolean);
     sub = parts.join(" / ") || p.emailAddresses?.[0]?.value || p.phoneNumbers?.[0]?.value || "";
+  } else if (displayName) {
+    sub = orgLine || p.emailAddresses?.[0]?.value || p.phoneNumbers?.[0]?.value || "";
   } else if (org?.name) sub = org?.title || p.emailAddresses?.[0]?.value || p.phoneNumbers?.[0]?.value || "";
   else sub = p.phoneNumbers?.[0]?.value || "";
   return { name, sub };
